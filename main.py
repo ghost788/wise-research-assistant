@@ -15,9 +15,9 @@ newspaper.settings.CACHE_DIRECTORY = os.path.join(custom_temp_dir, "cache")
 newspaper.settings.MEMOIZE_ARTICLES = False
 
 # Streamlit UI
-st.set_page_config(page_title="TopicWise – AI Research Assistant")
-st.title("🧠 TopicWise – AI Research Assistant")
-st.subheader("Generate structured research briefs using Hugging Face summarizer + SerpAPI")
+st.set_page_config(page_title="Wise – AI Research Assistant")
+st.title("Wise – AI Research Assistant")
+st.subheader("Generate structured research briefs with source references")
 
 topic = st.text_input("Enter a topic you'd like to research:")
 
