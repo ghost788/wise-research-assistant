@@ -1,59 +1,70 @@
 import streamlit as st
+import requests
 from newspaper import Article
+import newspaper
+import os
+import tempfile
+
+# ✅ Fix Windows temp directory issue
+custom_temp_dir = os.path.join(tempfile.gettempdir(), "newspaper_custom")
+if not os.path.exists(custom_temp_dir):
+    os.makedirs(custom_temp_dir)
+
+newspaper.settings.SCRAPER_TEMP_DIR = custom_temp_dir
+newspaper.settings.CACHE_DIRECTORY = os.path.join(custom_temp_dir, "cache")
+newspaper.settings.MEMOIZE_ARTICLES = False
 
 # Streamlit UI
 st.set_page_config(page_title="TopicWise – AI Research Assistant")
 st.title("🧠 TopicWise – AI Research Assistant")
-st.subheader("Generate structured research briefs from preloaded content")
+st.subheader("Generate structured research briefs using Hugging Face summarizer + SerpAPI")
 
 topic = st.text_input("Enter a topic you'd like to research:")
 
-# 🔁 Hardcoded list of article links (SerpAPI mock)
+# 🔍 Live article search via SerpAPI
 def get_articles(query):
-    return [
-        "https://fintech.global/2025/02/27/how-ai-and-automation-are-transforming-e-invoicing-in-2025/",
-        "https://blog.axway.com/newsroom/e-invoicing-mandates-implementing-ai-frameworks-and-a-file-transfer-secret-weapon-latest-from-the-axway-blog",
-        "https://www.comarch.com/trade-and-services/data-management/news/ai-capabilities-in-the-context-of-mandatory-invoice-exchange/",
-        "https://www.ascendsoftware.com/blog/einvoicing-mandates",
-        "https://easy-software.com/en/newsroom/ai-in-accounting-better-data-new-opportunities-for-companies/"
-    ]
+    SERPAPI_KEY = st.secrets.get("SERPAPI_KEY") or os.getenv("SERPAPI_KEY")
+    if not SERPAPI_KEY:
+        return []
 
-# 🧠 Hardcoded summaries per domain
-def summarize(text, topic, url=None):
-    mock_summaries = {
-        "fintech.global": """- AI and automation are enabling real-time invoice validation, reducing fraud and human errors across finance departments.
-- Predictive analytics are being used to forecast payment timelines, enhancing cash flow visibility for CFOs.
-- Integration with ERP systems is becoming seamless through AI-driven APIs and connectors.
-- E-invoicing compliance is increasingly automated through AI that adapts to jurisdictional tax rules.""",
-
-        "axway.com": """- AI frameworks are being layered onto traditional B2B integration platforms to enforce evolving e-invoicing mandates.
-- The article emphasizes the importance of secure file transfer as the “glue” between AI analysis and invoice submission workflows.
-- Compliance strategies now include continuous monitoring powered by machine learning.
-- Companies need cross-functional teams to manage both IT integration and regulatory interpretation.""",
-
-        "comarch.com": """- AI is being embedded into invoice validation engines to catch data mismatches and schema compliance issues.
-- Adaptive learning systems can now detect new fraud patterns in real-time invoice exchange.
-- AI capabilities are helping businesses prepare for mandatory B2G and B2B invoice exchange in Europe.
-- Human oversight remains essential, especially during transitional compliance rollouts.""",
-
-        "ascendsoftware.com": """- Governments are accelerating mandates for e-invoicing, pushing enterprises to adopt automation.
-- AI simplifies onboarding for vendors by interpreting and correcting invoice formats automatically.
-- Intelligent workflows are reducing invoice approval times from days to hours.
-- Enterprises are prioritizing AI tools that reduce manual intervention while maintaining audit trails.""",
-
-        "easy-software.com": """- AI is improving data quality in accounting systems, which directly enhances invoice accuracy.
-- Automation now covers extraction, matching, and error detection — creating "touchless invoicing."
-- Mid-sized businesses are benefiting from pre-trained models without needing in-house data science teams.
-- AI opens up strategic opportunities in spend analysis and working capital optimization."""
+    search_url = "https://serpapi.com/search"
+    params = {
+        "q": query,
+        "engine": "google",
+        "api_key": SERPAPI_KEY,
+        "num": 5,
     }
 
-    for domain in mock_summaries:
-        if domain in url:
-            return mock_summaries[domain]
+    try:
+        res = requests.get(search_url, params=params)
+        results = res.json().get("organic_results", [])
+        return [r["link"] for r in results if "link" in r]
+    except Exception as e:
+        return []
 
-    return f"🔧 [MOCK] Summary for topic: {topic} (text length: {len(text)})"
+# ✂️ Hugging Face summarization
+def summarize(text):
+    HUGGINGFACE_API_TOKEN = st.secrets.get("HUGGINGFACE_API_TOKEN") or os.getenv("HUGGINGFACE_API_TOKEN")
+    if not HUGGINGFACE_API_TOKEN:
+        return "❌ Missing Hugging Face API Token"
 
-# ✅ Article extraction
+    API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    headers = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
+    payload = {
+        "inputs": text[:1000],  # Truncate for speed and safety
+        "parameters": {"min_length": 60, "max_length": 300}
+    }
+
+    response = requests.post(API_URL, headers=headers, json=payload)
+    if response.status_code != 200:
+        return f"❌ Hugging Face API Error {response.status_code}: {response.text}"
+
+    try:
+        return response.json()[0]["summary_text"]
+    except Exception as e:
+        return f"❌ Error parsing response: {e}"
+
+# 📄 Extract clean text
 def extract_article_text(url):
     article = Article(url)
     article.download()
@@ -62,17 +73,17 @@ def extract_article_text(url):
 
 # 🧪 App logic
 if topic:
-    with st.spinner("🔍 Generating summaries... please wait"):
+    with st.spinner("🔍 Searching and summarizing..."):
         links = get_articles(topic)
         all_summaries = []
 
         for link in links:
             try:
                 article_text = extract_article_text(link)
-                summary = summarize(article_text, topic, url=link)
+                summary = summarize(article_text)
                 all_summaries.append((link, summary))
             except Exception as e:
-                print(f"Error for {link}: {e}")
+                all_summaries.append((link, f"❌ Error: {e}"))
                 continue
 
     if all_summaries:
@@ -81,4 +92,4 @@ if topic:
             st.markdown(f"### 🔗 Source: [{link}]({link})")
             st.markdown(summary)
     else:
-        st.error("No summaries could be generated.")
+        st.error("No summaries could be generated. Try another topic or check your API keys.")
