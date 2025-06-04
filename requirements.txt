@@ -1,0 +1,6 @@
+streamlit
+openai>=1.0.0
+requests
+newspaper3k
+python-dotenv
+lxml[html_clean]
